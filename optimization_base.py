@@ -2,7 +2,6 @@ import matplotlib
 matplotlib.use("agg")
 
 import sys
-import numpy
 import hist
 import pylab
 import time
@@ -18,8 +17,9 @@ try:
     MAUTOGRAD = True
     import autograd
     from autograd import jacobian, primitive
-    import autograd.numpy as anumpy
+    import autograd.numpy as numpy
 except ImportError:
+    import numpy
     MAUTOGRAD = False
 ###################################
 
@@ -69,7 +69,7 @@ except ImportError:
 
 class m(object):
   
-  def __init__(self, minim_function, param_names, structure_init, additional_args=[], additional_kwargs=dict(), minimizer_kwargs=dict(), jac_minim_function=None, bounds=dict(), callback=None, callback_args=[], callback_kwargs=dict()):
+  def __init__(self, minim_function, param_names, structure_init, additional_args=[], additional_kwargs=dict(), minimizer_kwargs=dict(), jac_minim_function=None, bounds=dict(), callback=None, callback_args=[], callback_kwargs=dict(), verbose=False):
 
     self.minim_function=minim_function
 
@@ -79,6 +79,9 @@ class m(object):
     #print "added function with argspect ", self.argspec_original
 
     self.param_names=param_names
+    if(type(self.param_names)==list):
+      self.param_names=numpy.array(self.param_names)
+
     self.dim=len(self.param_names)
     self.minim_function_jacobian=jac_minim_function
 
@@ -105,7 +108,7 @@ class m(object):
       if(self.minim_function_jacobian is not None):
         print "Defined a jacobian function but autograd is not installed. Requires Autograd to work, please install autograd if you want the derivative!!!"
         exit(-1)
-
+    self.verbose=verbose
     # vector containing all calls to optimize and corresponding results
     self.minimization_histories=[]
 
@@ -167,8 +170,8 @@ class m(object):
     #  self.pure_scalar_args=True
 
     if(arg_count!=len(self.param_names)):
-      print "Error in fn def .."
-      print "Argument Count for the function (%d) and the initial parameter structure (%d) does not match" % (len(self.param_names), arg_count)
+      print "Error in fn init.."
+      print "Number of param names for the function (%d) and the initial parameter structure (%d) does not match. Each parameter, even if part of a vectorial argument must get a name (treat parameter names as if they correspond to pure scalar arguments)" % (len(self.param_names), arg_count)
       exit(-1)
 
     ## callback funtionality
@@ -193,8 +196,8 @@ class m(object):
 
     self.is_optimizing=False
 
-    ######### MINIM DEFS ...
-    ###### each method comes with an interface and single argument/multi argument option
+    #### Algorithm interface definitions. each method comes with a tuple: (name, *argument_type*), where argument_type specifiies if the algortihm
+    #### requires multiple scalar or one vectorial argument.
 
     self.minim_defs=dict()
 
@@ -203,6 +206,11 @@ class m(object):
     scipy_methods=["BFGS", "CG", "COBYLA", "dogleg", "L-BFGS-B", "Nelder-Mead", "Newton-CG", "Powell", "SLSQP", "TNC", "trust-ncg"]
     for method in scipy_methods:
       self.minim_defs[method]=("scipy", "single")
+
+    ## SCIPY least_squares
+    lq_methods=["least_squares"]
+    for method in lq_methods:
+      self.minim_defs[method]=("least_squares", "single")
 
     ## IMINUIT
 
@@ -223,7 +231,7 @@ class m(object):
   def make_multi(self, fn):
 
     def multi_fn(*x):
-      return fn(anumpy.array(x))
+      return fn(numpy.array(x))
 
     return multi_fn
 
@@ -249,19 +257,17 @@ class m(object):
           if(a[1]=="scalar"):
             new_arglist.append(x[cur_index])
           else:
-            for b in c:
-              new_arglist.append(x[cur_index:cur_index+a[0]])
+            new_arglist.append(x[cur_index:cur_index+a[0]])
 
           cur_index+=a[0]
 
-
+        
       ## bounds check ... used for sampling algorithms only....
 
         if(check_bounds_and_return_neg_inf):
           for p_ind, p in enumerate(self.param_names):
             if( (x[p_ind]+1e-12)<self.bounds[p][0] or (x[p_ind]-1e-12)>self.bounds[p][1]):
               if(flip_sign):
-                print "breakout"
                 return -numpy.inf
               else:
                 return numpy.inf
@@ -277,7 +283,7 @@ class m(object):
         if(self.is_optimizing and log_steps):
           self.cur_step_params.append(copy.copy(x))
           self.cur_step_fnvals.append(return_val)
-          print "LOGGING"
+          
         if(self.callback is not None):
 
           self.callback(*self.callback_args, **self.callback_kwargs)
@@ -290,6 +296,9 @@ class m(object):
       ## used for samplers!
       if(flip_sign):
         return_val*=-1.0
+
+      if(self.verbose):
+        print "- iter ", self.cur_niter, " - ", return_val
 
       return return_val
     
@@ -376,7 +385,7 @@ class m(object):
         
         
         def fn_constrained(x):
-          #new_vec=anumpy.zeros(len(self.total_param_list))
+          #new_vec=numpy.zeros(len(self.total_param_list))
           #new_vec[self.fixed_mask]=self.fixed_vals
 
           #print "constrained parameter vec..."
@@ -418,17 +427,17 @@ class m(object):
               
               if(opts[0]=="throughgoing"):
                 #print "through.."
-                new_list.append( anumpy.array(x[opts[1][0]:opts[1][1]]))
+                new_list.append( numpy.array(x[opts[1][0]:opts[1][1]]))
               elif(opts[0]=="fix"):
                 #print "fix.."
-                new_list.append(anumpy.array([opts[1][1]]))
+                new_list.append(numpy.array([opts[1][1]]))
               elif(opts[0]=="profile"):
                 #print "profile..."
-                new_list.append(anumpy.array([profile_results[opts[1]]]))
+                new_list.append(numpy.array([profile_results[opts[1]]]))
           #print "newlist ", new_list
           #print new_list
           #print wrapped_fn
-          return wrapped_fn(anumpy.concatenate(new_list))
+          return wrapped_fn(numpy.concatenate(new_list))
 
         def fn_multi(*x):
 
@@ -558,13 +567,23 @@ class m(object):
     return this_param_constraints
 
   def optimize(self, **kwargs):
+
     method="L-BFGS-B"
 
     if(kwargs.has_key("method")):
       method=kwargs["method"]
+    if(kwargs.has_key("methods")):
+      method=kwargs["methods"]
 
     if(type(method)==str):
-      method=list(method)
+      method=[method]
+    elif(type(method)==tuple):
+      method=[method]
+    
+    if(type(method)!=list):
+      print "Wrong method definition: ", method, " - requires tuple/str or list of tuples/strings.. fix it!"
+      exit(-1)
+
 
     best_result=None
     for m in method:
@@ -581,12 +600,18 @@ class m(object):
             for vdict_key in it.keys():
               minimizer_kwargs[vdict_key]=it[vdict_key]
         new_kwargs["minimizer_kwargs"]=minimizer_kwargs
-      else:
+      elif(type(m)==str):
         new_kwargs["method"]=m
+      else:
+        print "Unkown method defition for optimization: ", m ," .. requires tuple/str or list of tuples/strings"
+        exit(-1)
+
       if(best_result is not None):
         ## already did one iteration..
         ## give new initialization vector
+        print "OLD INIT", self.init_parameter_values_single_vec
         new_kwargs["init"]=best_result["pars_vec"]
+        print "NEW INIT", new_kwargs["init"]
         
 
       res=self.optimize_single(**new_kwargs)
@@ -599,18 +624,19 @@ class m(object):
 
 
     ### FIXME should probably merge results and return combined thing
+    if(self.verbose):
+      print "finished overall... ", best_result["pars_dict"]
 
-    if(self.callback is not None):
-
-      self.callback(*self.callback_args, force=True)
       
     return best_result
 
     
   #def Optimize(self, method="migrad", maxcalls=15000, printMode=1, strategy=1, tolerance=1.0, scan_tuples=[], learn_gp=False, nlopt_ftol_opt=1e-5,lq_loss="linear"):
-  def optimize_single(self, **kwargs):#maxcalls=15000, printMode=1, strategy=1, tolerance=1.0, scan_tuples=[], learn_gp=False, nlopt_ftol_opt=1e-5,lq_loss="linear"):
-      print "------------ BEGING OPTIIZE ---------------------"
-      print kwargs
+  def optimize_single(self, **kwargs):
+      if(self.verbose):
+        print "------------ BEGIN OPTIMIZE ---------------------"
+        print kwargs
+        print "-------------------------------------------------"
       ## a result dictionary which will be filled in a standardized way by all different algorithms
       #if(len(init_pars)==0):
       #  print "initial start values are required as position arguments, also for determination of argument structure!"
@@ -632,6 +658,9 @@ class m(object):
       force_no_gradient=False
       if(kwargs.has_key("force_no_gradient")):
         force_no_gradient=kwargs["force_no_gradient"]
+      if(MAUTOGRAD==False):
+        print "############# AUTOGRAD not found - forcing gradient to False! ############ "
+        force_no_gradient=True
 
       minimizer_kwargs=dict()
       if(kwargs.has_key("minimizer_kwargs")):
@@ -677,7 +706,7 @@ class m(object):
 
       
       ## if no initial parvec is given, start with the real initialized parameters
-      if(init_parvec==None):
+      if(init_parvec is None):
         init_parvec=self.init_parameter_values_single_vec[minim_mask]
 
       """
@@ -703,6 +732,7 @@ class m(object):
           exit(-1)
 
         scipy_bounds=[]
+
         for b in self.bounds.keys():
 
           if(b in self.param_names[minim_mask]):
@@ -731,8 +761,7 @@ class m(object):
           #for minim_kwarg in minimizer_kwargs.keys():
           #  scipy_opts[minim_kwarg]=minimizer_kwargs[minim_kwarg]
 
-         
-          
+        
           res=scipy.optimize.minimize(scipy_minim_function, init_parvec, **scipy_opts)
 
           ## not logging .. so we must see after each minimization which is the best result ... and save it
@@ -765,6 +794,8 @@ class m(object):
             minuit_opts["limit_%s" % b]=self.bounds[b]
             minuit_opts["error_%s" % b]=1.0
 
+
+
         minuit_opts["forced_parameters"]=self.param_names[minim_mask]
 
         migrad_opts=minimizer_kwargs
@@ -775,7 +806,6 @@ class m(object):
 
         for ind in range(len(self.param_names[minim_mask])):
           minuit_opts[self.param_names[minim_mask][ind]]=init_parvec[ind]
-
 
         self.is_optimizing=True
         tbef=time.time()
@@ -919,6 +949,67 @@ class m(object):
           #print pos, prob
           sec_pos, sec_prob, sec_state=sampler.run_mcmc(numpy.array(random_walker_init), int( float(minimizer_kwargs["niter"])/float(nwalkers)))
 
+      elif(method=="least_squares"):
+        ## calls scipy.least_squares .. function must be residual
+
+        if not MSCIPY:
+          print "Opimization with %s requires scipy .. scipy not found..." % method
+          exit(-1)
+
+        scipy_bounds=[]
+        lower_bounds=[]
+        upper_bounds=[]
+
+        for b in self.bounds.keys():
+          if(b in self.param_names[minim_mask]):
+            lower_bounds.append(self.bounds[b][0])
+            upper_bounds.append(self.bounds[b][1])
+          else:
+            lower_bounds.append(-inf)
+            upper_bounds.append(inf)
+
+        scipy_bounds=(numpy.array(lower_bounds), numpy.array(upper_bounds))
+        
+        self.is_optimizing=True
+        tbef=time.time()
+
+        for scipy_minim_function in minim_functions:
+
+          scipy_opts=dict()#copy.copy(kwargs)
+          scipy_opts["method"]="trf"
+          scipy_opts["bounds"]=scipy_bounds
+          scipy_opts["loss"]="linear"
+
+          scipy_minim_function_jac=None
+
+          if(force_no_gradient == False):
+            scipy_minim_function_jac=jacobian(scipy_minim_function)
+            scipy_opts["jac"]=scipy_minim_function_jac
+
+          if(minimizer_kwargs.has_key("niter")):
+            scipy_opts["max_nfev"]=minimizer_kwargs["niter"]
+            
+        
+        
+          res=scipy.optimize.least_squares(scipy_minim_function, init_parvec, **scipy_opts)
+
+          ## not logging .. so we must see after each minimization which is the best result ... and save it
+          if(not log_steps):
+            update_best=False
+            if(best_llh is None):
+              update_best=True
+            else:
+              if(res["fun"]<best_llh):
+                update_best=True
+            if(update_best):
+              
+              best_llh=res["fun"]
+              best_valdict=dict()
+              for index, p in enumerate(self.param_names[minim_mask]):
+                best_valdict[p]=res["x"][index]
+              best_vals=res["x"]
+
+        
 
       ## after the optimization is done .. save stuff
       self.is_optimizing=False
@@ -943,6 +1034,7 @@ class m(object):
         result_object["fnval_steps"]=numpy.array(self.cur_step_fnvals)
 
         best_mask=result_object["fnval_steps"]==min(result_object["fnval_steps"])
+        
         result_object["fnval"]=result_object["fnval_steps"][best_mask][0]
 
         best_dict=collections.OrderedDict()
@@ -951,7 +1043,6 @@ class m(object):
           best_dict[p]=steps[p][best_mask][0]
           best_pars.append(best_dict[p])
 
-        print "minim mask...", minim_mask
         best_pars=numpy.array(best_pars)
 
         result_object["pars_dict"]=best_dict
@@ -999,6 +1090,9 @@ class m(object):
       self.cur_niter=0
       self.cur_step_fnvals=[]
       self.cur_step_params=[]
+
+      if(self.verbose):
+        print "finished intermediate ... ", result_object["pars_dict"]
 
       return result_object
 
@@ -1507,7 +1601,7 @@ class m(object):
         for xg in x_vals_grad:
           for yg in y_vals_grad:
             
-            grad_res=jac_fn(anumpy.array([xg,yg]))
+            grad_res=jac_fn(numpy.array([xg,yg]))
             print "x,y: ", xg,yg
             print "grad", grad_res
 
